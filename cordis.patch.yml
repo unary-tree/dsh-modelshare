@@ -1,0 +1,9 @@
+# Register the model-sharing endpoint. Everything else (API keys, model
+# allow-lists, the pause switch) is edited on the Model Share settings page,
+# not here.
+- insert:
+    - id: modelshare
+      name: dsh-modelshare
+      config:
+        host: 127.0.0.1
+        port: 8787

@@ -14,13 +14,26 @@
 
 ## 安装
 
+### 方式一：dsh plugin add（推荐）
+
 ```bash
-# 1. 建 junction，让 DSH 按包名找到插件
+dsh plugin --profile desktop add github:unary-tree/dsh-modelshare
+```
+
+包声明了 `dsh.bundle.patch`，装好后会自动注册，不需要手改 YAML。
+
+### 方式二：手动安装
+
+```bash
+# 1. 克隆到任意位置
+git clone https://github.com/unary-tree/dsh-modelshare "$env:USERPROFILE\dsh-plugins\dsh-modelshare"
+
+# 2. 建 junction，让 DSH 按包名找到它
 $link   = "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-modelshare"
 $target = "$env:USERPROFILE\dsh-plugins\dsh-modelshare"
 New-Item -ItemType Junction -Path $link -Target $target
 
-# 2. 在 profile 的 cordis.patch.yml 末尾追加
+# 3. 在 profile 的 cordis.patch.yml 末尾追加：
 #    - insert:
 #        - id: modelshare
 #          name: dsh-modelshare
@@ -29,8 +42,7 @@ New-Item -ItemType Junction -Path $link -Target $target
 #            port: 8787
 ```
 
-改完 `cordis.patch.yml` 会自动热加载。**新增插件的客户端页面需要重启一次 DSH** 才会出现在设置里。
-
+改完 `cordis.patch.yml` 会自动热加载。**新增插件的设置页面需要重启一次 DSH** 才会出现。
 ## 使用
 
 打开 **设置 → 模型共享**：
