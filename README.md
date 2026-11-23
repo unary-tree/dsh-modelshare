@@ -131,6 +131,20 @@ node test/client.mjs   # 8 项：页面 bundle 加载与注册
 
 两个测试都不需要启动 DSH：它们用假的 `ctx.llm` 和假的模块加载器。
 
+## 渲染注意（给改这个页面的人）
+
+页面 bundle 里必须用 `React.createElement`，**不能用 `jsx()`**：
+
+```js
+// 对：children 是尾随参数
+h('div', { className: 'x' }, h('p', null, '文字'))
+
+// 错：jsx 的第三个参数是 key，children 会被静默丢弃 → 页面空白
+jsx('div', { className: 'x' }, h('p', null, '文字'))
+```
+
+`test/page.mjs` 会断言页面渲染出可见文本，就是为了拦住这类「组件执行了但渲染为空」的 bug。
+
 ## 已知限制
 
 - 只实现 Chat Completions；`/v1/completions`、`/v1/embeddings`、`/v1/responses` 未实现（返回明确的 400）
