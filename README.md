@@ -73,6 +73,7 @@ print(r.choices[0].message.content)
 |---|---|
 | `GET /v1/models` | 列出**这个 Key 被允许**的模型 |
 | `POST /v1/chat/completions` | 流式 / 非流式、多轮、工具调用、`stop`、`temperature`、`max_tokens`、`reasoning_effort` |
+| `POST /v1/responses` | OpenAI Responses API（Codex 等新客户端用这个），支持流式事件与函数调用 |
 | `GET /health` | 健康检查（免鉴权） |
 | `GET/PUT /modelshare/api/settings` | 页面读写设置（挂在 DSH Web 同源，不是 8787） |
 | `POST/DELETE /modelshare/api/keys` | 页面增删 Key |
@@ -147,7 +148,7 @@ jsx('div', { className: 'x' }, h('p', null, '文字'))
 
 ## 已知限制
 
-- 只实现 Chat Completions；`/v1/completions`、`/v1/embeddings`、`/v1/responses` 未实现（返回明确的 400）
+- `/v1/completions`（旧版补全）与 `/v1/embeddings` 未实现（返回明确的 400）；`/v1/chat/completions` 与 `/v1/responses` 都已支持
 - 图片输入受 DSH 文本适配器限制
 - 请求不写入 DSH 会话历史，每次调用都是一次性请求
 - **桌面版 DSH 的设置页面**：桌面 App 从前端 dist 加载 UI，不经过 HTTP `/plugins` 路由，因此页面在桌面版里是否可见取决于该版本是否启用 client-modules 路由；Web 模式（`dsh web`）下页面正常工作
