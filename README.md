@@ -74,7 +74,7 @@ print(r.choices[0].message.content)
 | `GET /v1/models` | 列出**这个 Key 被允许**的模型 |
 | `POST /v1/chat/completions` | 流式 / 非流式、多轮、工具调用、`stop`、`temperature`、`max_tokens`、`reasoning_effort` |
 | `GET /health` | 健康检查（免鉴权） |
-| `GET/PUT /modelshare/api/settings` | 页面读写设置 |
+| `GET/PUT /modelshare/api/settings` | 页面读写设置（挂在 DSH Web 同源，不是 8787） |
 | `POST/DELETE /modelshare/api/keys` | 页面增删 Key |
 
 思考过程通过 `reasoning_content` 返回，与 DeepSeek 官方 API 一致。

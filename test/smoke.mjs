@@ -39,9 +39,15 @@ function fakeStream(options) {
   })()
 }
 
+/** Records the route the plugin registers for the settings page. */
+const routes = []
 const ctx = {
   effect: (factory) => factory(),
   inject() {},
+  webServer: {
+    register: (route) => { routes.push(route); return () => {} },
+    tapIndex: () => () => {},
+  },
   agentDefaultModel: { currentSelection: () => ({ provider: 'fake', model: 'm1' }) },
   llm: {
     listProviders: () => [{ id: 'fake', name: 'Fake' }, { id: 'other', name: 'Other' }],
@@ -67,11 +73,14 @@ const json = async (path, init) => {
 }
 
 try {
+  // --- wiring: the page API must ride the DSH web server, not the endpoint ---
+  check('registers the page API on the web server', routes.some((r) => r.path === '/modelshare'), JSON.stringify(routes.map((r) => r.path)))
+
   // --- page API ---
   const settings = await json('/modelshare/api/settings')
   check('settings endpoint answers', settings.status === 200 && settings.body.ok === true)
   check('catalog lists every provider model', settings.body.models.length === 3, JSON.stringify(settings.body.models?.map((m) => m.id)))
-  check('base url is advertised', /^http:\/\/[^/]+\/v1$/.test(settings.body.baseUrl ?? ''), settings.body.baseUrl)
+  check('base url points at the endpoint port', settings.body.baseUrl === 'http://127.0.0.1:18788/v1', settings.body.baseUrl)
 
   // --- key lifecycle ---
   const created = await json('/modelshare/api/keys', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
