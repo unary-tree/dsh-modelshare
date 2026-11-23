@@ -1,0 +1,33 @@
+{
+  "name": "dsh-modelshare",
+  "version": "0.1.0",
+  "description": "Share this DeepSeek Harness profile's models over a local OpenAI-compatible endpoint, with a settings page for API keys and model access",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web"
+    }
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "openai",
+    "proxy",
+    "models"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "lib",
+    "README.md",
+    "LICENSE"
+  ]
+}
