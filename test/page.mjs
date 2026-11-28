@@ -407,6 +407,88 @@ const REFRESHED = {
   }
 }
 
+// --- Clear must not re-tick everything ---
+{
+  const ReactC = makeReact()
+  const registeredC = []
+  const puts = []
+  const sandbox = {
+    window: { __ModuleLoader__: { load: (h) => registeredC.push(h) } },
+    document: { querySelector: () => null, createElement: () => ({ dataset: {}, textContent: '' }), head: { appendChild: () => {} } },
+    navigator: { clipboard: { writeText: async () => {} } },
+    fetch: async (url, init) => {
+      if (init && init.method === 'PUT') {
+        puts.push(JSON.parse(init.body))
+        return { ok: true, json: async () => ({ ok: true, settings: { ...JSON.parse(init.body) } }) }
+      }
+      return { ok: true, json: async () => SAMPLE }
+    },
+    setTimeout, clearTimeout, console,
+  }
+  sandbox.globalThis = sandbox
+  vm.createContext(sandbox)
+  vm.runInContext(source, sandbox, { filename: 'c.js' })
+  const seedC = { 'react': ReactC, 'react/jsx-runtime': jsxRuntime, '@deepseek-ai/dsh-client-ui-primitives': primitives }
+  const ex = registeredC[0].factory((spec) => {
+    if (Object.prototype.hasOwnProperty.call(seedC, spec)) return seedC[spec]
+    throw new Error('unexpected require ' + spec)
+  })
+  let cap = null
+  ex.apply({ slots: { inject: (k, cb) => cb(), register: (spec, component) => { cap = { spec, component }; return cap } } })
+  const Page = cap.component
+  Page({})
+  await new Promise((r) => setTimeout(r, 30))
+  ReactC.__reset()
+
+  const collectC = (t) => {
+    const buttons = []
+    const boxes = []
+    const walk = (v, d = 0) => {
+      if (v === null || v === undefined || d > 60) return
+      if (Array.isArray(v)) { for (const x of v) walk(x, d); return }
+      if (typeof v !== 'object') return
+      // Icon is a component too; a label-based comparison would be lost here.
+      if (typeof v.type === 'function') { walk(v.type(v.props ?? {}), d + 1); return }
+      if (v.type === 'button') buttons.push({ label: v.props?.children, onClick: v.props?.onClick })
+      if (v.type === 'input' && v.props?.type === 'checkbox') boxes.push({ checked: v.props?.checked })
+      if (v.props) walk(v.props.children, d + 1)
+    }
+    walk(t)
+    return { buttons, boxes }
+  }
+
+  // Start from an all-ticked whitelist so clearing is a real change.
+  const seeded = await (async () => {
+    // SAMPLE has sharedModels = ['workbuddy/deepseek-v4.1-flash'] (one of two);
+    // tick both first so every box starts on.
+    const before = collectC(Page({}))
+    const all = before.buttons.find((b) => b.label === '全选')
+    await all.onClick()
+    await new Promise((r) => setTimeout(r, 20))
+    ReactC.__reset()
+    return collectC(Page({}))
+  })()
+  check('全选 ticks every model', seeded.boxes.every((b) => b.checked === true), JSON.stringify(seeded.boxes))
+
+  ReactC.__reset()
+  const afterAll = collectC(Page({}))
+  const clear = afterAll.buttons.find((b) => b.label === '全部不选')
+  check('the clear control exists', clear !== undefined, JSON.stringify(afterAll.buttons.map((b) => b.label)))
+
+  if (clear) {
+    await clear.onClick()
+    await new Promise((r) => setTimeout(r, 30))
+    ReactC.__reset()
+    const after = collectC(Page({}))
+    check('clearing leaves every box unticked (regression)', after.boxes.every((b) => b.checked === false), JSON.stringify(after.boxes))
+    const last = puts.at(-1)
+    check('clearing persists an empty list, not "unrestricted"', last && last.sharedModels.length === 0 && last.unrestricted === false, JSON.stringify(last))
+  } else {
+    check('clearing leaves every box unticked (regression)', false, 'no clear control')
+    check('clearing persists an empty list, not "unrestricted"', false, 'no clear control')
+  }
+}
+
 const failed = results.filter((r) => !r.ok)
 console.log('\n' + (results.length - failed.length) + '/' + results.length + ' checks passed')
 process.exit(failed.length === 0 ? 0 : 1)

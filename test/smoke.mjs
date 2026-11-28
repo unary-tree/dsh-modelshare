@@ -108,7 +108,7 @@ try {
   const restricted = await json('/modelshare/api/settings', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ enabled: true, baseUrl: '', keys: [{ key, label: '', models: [], createdAt: new Date().toISOString() }], sharedModels: ['fake/m1'] }),
+    body: JSON.stringify({ enabled: true, baseUrl: '', keys: [{ key, label: '', models: [], createdAt: new Date().toISOString() }], sharedModels: ['fake/m1'], unrestricted: false }),
   })
   check('allow-list saves', restricted.status === 200 && restricted.body.settings.sharedModels.length === 1)
   const filtered = await json('/v1/models', { headers: { authorization: 'Bearer ' + key } })
@@ -130,7 +130,7 @@ try {
   await json('/modelshare/api/settings', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ enabled: false, baseUrl: '', keys: [{ key, label: '', models: [], createdAt: new Date().toISOString() }], sharedModels: [] }),
+    body: JSON.stringify({ enabled: false, baseUrl: '', keys: [{ key, label: '', models: [], createdAt: new Date().toISOString() }], sharedModels: [], unrestricted: true }),
   })
   const paused = await json('/v1/chat/completions', {
     method: 'POST',
@@ -143,7 +143,7 @@ try {
   await json('/modelshare/api/settings', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ enabled: true, baseUrl: '', keys: [{ key, label: '', models: [], createdAt: new Date().toISOString() }], sharedModels: [] }),
+    body: JSON.stringify({ enabled: true, baseUrl: '', keys: [{ key, label: '', models: [], createdAt: new Date().toISOString() }], sharedModels: [], unrestricted: true }),
   })
   const streamRes = await fetch(base + '/v1/chat/completions', {
     method: 'POST',
@@ -167,8 +167,21 @@ try {
   const store = new ShareStore({ file: join(dir, 'unit.json') })
   const entry = store.addKey({ label: 'x' })
   check('a fresh key is unrestricted', store.allowedModels(entry) === undefined && store.permits(entry, 'anything') === true)
-  store.replace({ enabled: true, sharedModels: ['a'], keys: [{ key: entry.key, label: '', models: ['b'], createdAt: '' }] })
+  store.replace({ enabled: true, sharedModels: ['a'], unrestricted: false, keys: [{ key: entry.key, label: '', models: ['b'], createdAt: '' }] })
   check('key models union with shared models', JSON.stringify(store.allowedModels(store.snapshot().keys[0])) === '["a","b"]')
+
+  // Regression: Clear used to re-open every model, because an empty list was
+  // read as "unrestricted". Clearing must now mean nothing is allowed.
+  store.replace({ enabled: true, sharedModels: [], unrestricted: false, keys: [{ key: entry.key, label: '', models: [], createdAt: '' }] })
+  const cleared = store.snapshot().keys[0]
+  check('clearing the list denies everything', store.permits(cleared, 'anything') === false, JSON.stringify(store.allowedModels(cleared)))
+  check('clearing does not flip back to unrestricted', store.snapshot().unrestricted === false)
+
+  // The old file format (no flag) still means "unrestricted when empty".
+  const legacy = coerceDocument({ enabled: true, keys: [], sharedModels: [] })
+  check('a legacy file with an empty list stays unrestricted', legacy.unrestricted === true)
+  const legacyList = coerceDocument({ enabled: true, keys: [], sharedModels: ['x'] })
+  check('a legacy file with a list is whitelist mode', legacyList.unrestricted === false)
 } finally {
   rmSync(dir, { recursive: true, force: true })
   const failed = results.filter((r) => !r.ok)
