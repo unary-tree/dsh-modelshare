@@ -372,7 +372,17 @@ const REFRESHED = {
       if (Array.isArray(v)) { for (const x of v) walk(x, d); return }
       if (typeof v !== 'object') return
       if (typeof v.type === 'function') { walk(v.type(v.props ?? {}), d + 1); return }
-      if (v.type === 'button') buttons.push({ label: v.props?.children, onClick: v.props?.onClick })
+      if (v.type === 'button') {
+        const kids = Array.isArray(v.props?.children) ? v.props.children : [v.props?.children]
+        const hasIcon = kids.some((kid) => kid && typeof kid === 'object' && kid.type && String(kid.type) === 'svg')
+        buttons.push({
+          label: v.props?.children,
+          // The per-model test control is icon-only; its name lives in aria-label.
+          ariaLabel: v.props?.['aria-label'],
+          iconOnly: hasIcon && typeof v.props?.children !== 'string',
+          onClick: v.props?.onClick,
+        })
+      }
       if (v.props) walk(v.props.children, d + 1)
     }
     walk(t)
@@ -380,8 +390,9 @@ const REFRESHED = {
   }
 
   const first = collectT(Page({}))
-  const tests = first.buttons.filter((b) => b.label === '测试')
+  const tests = first.buttons.filter((b) => b.ariaLabel && String(b.ariaLabel).includes('测试'))
   check('every model row has a test button', tests.length === SAMPLE.models.length, tests.length + ' vs ' + SAMPLE.models.length)
+  check('the test control is an icon, not a text button', tests.every((b) => b.label === undefined || typeof b.label === 'object'), JSON.stringify(tests.map((b) => typeof b.label)))
 
   if (tests.length > 0) {
     await tests[0].onClick()
