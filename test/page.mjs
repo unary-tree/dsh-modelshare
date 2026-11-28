@@ -330,6 +330,72 @@ const REFRESHED = {
   }
 }
 
+// --- per-model test button ---
+{
+  const ReactT = makeReact()
+  const registeredT = []
+  const callsT = []
+  const sandbox = {
+    window: { __ModuleLoader__: { load: (h) => registeredT.push(h) } },
+    document: { querySelector: () => null, createElement: () => ({ dataset: {}, textContent: '' }), head: { appendChild: () => {} } },
+    navigator: { clipboard: { writeText: async () => {} } },
+    fetch: async (url, init) => {
+      callsT.push({ url, init })
+      if (String(url).includes('/test-model')) {
+        return { ok: true, json: async () => ({ ok: true, ms: 123, model: JSON.parse(init.body).model, reply: 'pong' }) }
+      }
+      return { ok: true, json: async () => SAMPLE }
+    },
+    setTimeout, clearTimeout, console,
+  }
+  sandbox.globalThis = sandbox
+  vm.createContext(sandbox)
+  vm.runInContext(source, sandbox, { filename: 'c.js' })
+  const seedT = { 'react': ReactT, 'react/jsx-runtime': jsxRuntime, '@deepseek-ai/dsh-client-ui-primitives': primitives }
+  const ex = registeredT[0].factory((spec) => {
+    if (Object.prototype.hasOwnProperty.call(seedT, spec)) return seedT[spec]
+    throw new Error('unexpected require ' + spec)
+  })
+  let cap = null
+  ex.apply({ slots: { inject: (k, cb) => cb(), register: (spec, component) => { cap = { spec, component }; return cap } } })
+  const Page = cap.component
+  Page({})
+  await new Promise((r) => setTimeout(r, 30))
+  ReactT.__reset()
+
+  const collectT = (t) => {
+    const buttons = []
+    const texts = []
+    const walk = (v, d = 0) => {
+      if (v === null || v === undefined || d > 60) return
+      if (typeof v === 'string' || typeof v === 'number') { texts.push(String(v)); return }
+      if (Array.isArray(v)) { for (const x of v) walk(x, d); return }
+      if (typeof v !== 'object') return
+      if (typeof v.type === 'function') { walk(v.type(v.props ?? {}), d + 1); return }
+      if (v.type === 'button') buttons.push({ label: v.props?.children, onClick: v.props?.onClick })
+      if (v.props) walk(v.props.children, d + 1)
+    }
+    walk(t)
+    return { buttons, text: texts.join(' ') }
+  }
+
+  const first = collectT(Page({}))
+  const tests = first.buttons.filter((b) => b.label === '测试')
+  check('every model row has a test button', tests.length === SAMPLE.models.length, tests.length + ' vs ' + SAMPLE.models.length)
+
+  if (tests.length > 0) {
+    await tests[0].onClick()
+    await new Promise((r) => setTimeout(r, 30))
+    ReactT.__reset()
+    const after = collectT(Page({}))
+    check('the test posts the model id', callsT.some((c) => String(c.url).includes('/test-model') && JSON.parse(c.init.body).model), JSON.stringify(callsT.filter((c) => String(c.url).includes('test-model')).map((c) => c.init?.body)))
+    check('a passing test shows 可用 with latency', /可用\s*123ms/.test(after.text), JSON.stringify(after.text.slice(0, 160)))
+  } else {
+    check('the test posts the model id', false, 'no test buttons')
+    check('a passing test shows 可用 with latency', false, 'no test buttons')
+  }
+}
+
 const failed = results.filter((r) => !r.ok)
 console.log('\n' + (results.length - failed.length) + '/' + results.length + ' checks passed')
 process.exit(failed.length === 0 ? 0 : 1)
