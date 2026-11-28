@@ -35,6 +35,7 @@ function makeReact() {
     },
     useCallback: (fn) => fn,
     useEffect: (fn) => { fn() },
+    useRef: (init) => ({ current: init }),
     Fragment: 'Fragment',
     __reset: () => { cursor = 0 },
   }
@@ -160,6 +161,94 @@ check('loaded page shows the Base URL', /Base URL/.test(text2) && found2.codes.s
 check('loaded page shows the model section', /可用模型/.test(text2))
 check('loaded page renders one checkbox per model', found2.checkboxes === SAMPLE.models.length, found2.checkboxes + ' vs ' + SAMPLE.models.length)
 check('loaded page lists model ids', /workbuddy\/deepseek-v4\.1-flash/.test(text2) || found2.checkboxes === 2)
+
+// --- sharing switch ---
+// Render the page twice (enabled and disabled) and assert the control reflects
+// each state, then click it and check the PUT that goes out.
+async function renderWith(enabled) {
+  const sample = {
+    ...SAMPLE,
+    settings: { ...SAMPLE.settings, enabled },
+  }
+  const ReactX = makeReact()
+  const registered = []
+  const calls = []
+  const sandbox = {
+    window: { __ModuleLoader__: { load: (h) => registered.push(h) } },
+    document: { querySelector: () => null, createElement: () => ({ dataset: {}, textContent: '' }), head: { appendChild: () => {} } },
+    navigator: { clipboard: { writeText: async () => {} } },
+    fetch: async (url, init) => {
+      calls.push({ url, init })
+      if (init && init.method === 'PUT') {
+        const body = JSON.parse(init.body)
+        return { ok: true, json: async () => ({ ok: true, settings: { ...sample.settings, ...body } }) }
+      }
+      return { ok: true, json: async () => ({ ...sample, settings: { ...sample.settings } }) }
+    },
+    setTimeout, clearTimeout, console,
+  }
+  sandbox.globalThis = sandbox
+  vm.createContext(sandbox)
+  vm.runInContext(source, sandbox, { filename: 'c.js' })
+  const seedX = { 'react': ReactX, 'react/jsx-runtime': jsxRuntime, '@deepseek-ai/dsh-client-ui-primitives': primitives }
+  const ex = registered[0].factory((spec) => {
+    if (Object.prototype.hasOwnProperty.call(seedX, spec)) return seedX[spec]
+    throw new Error('unexpected require ' + spec)
+  })
+  let cap = null
+  ex.apply({ slots: { inject: (k, cb) => cb(), register: (spec, component) => { cap = { spec, component }; return cap } } })
+  const Page = cap.component
+  Page({})
+  await new Promise((r) => setTimeout(r, 30))
+  ReactX.__reset()
+  const tree = Page({})
+  return { tree, calls }
+}
+
+/** Flatten a tree to text and collect buttons. */
+function inspect(tree) {
+  const texts = []
+  const buttons = []
+  const seen = new Set()
+  const walk = (v, depth = 0) => {
+    if (v === null || v === undefined || depth > 60) return
+    if (typeof v === 'string' || typeof v === 'number') { texts.push(String(v)); return }
+    if (Array.isArray(v)) { for (const x of v) walk(x, depth); return }
+    if (typeof v !== 'object') return
+    if (typeof v.type === 'function') {
+      if (seen.has(v.type)) return
+      seen.add(v.type)
+      walk(v.type(v.props ?? {}), depth + 1)
+      return
+    }
+    if (v.type === 'button') buttons.push({ label: v.props?.children, onClick: v.props?.onClick })
+    if (v.props) walk(v.props.children, depth + 1)
+  }
+  walk(tree)
+  return { text: texts.join(' '), buttons }
+}
+
+const onState = await renderWith(true)
+const on = inspect(onState.tree)
+check('switch shows the enabled state', /共享开关/.test(on.text) && /已开启/.test(on.text), JSON.stringify(on.text.slice(0, 90)))
+check('enabled state offers 关闭共享', on.buttons.some((b) => b.label === '关闭共享'), JSON.stringify(on.buttons.map((b) => b.label)))
+
+const offState = await renderWith(false)
+const off = inspect(offState.tree)
+check('switch shows the disabled state', /已关闭/.test(off.text), JSON.stringify(off.text.slice(0, 90)))
+check('disabled state offers 开启共享', off.buttons.some((b) => b.label === '开启共享'), JSON.stringify(off.buttons.map((b) => b.label)))
+check('disabled state explains the consequence', /请求都会被拒绝|503/.test(off.text))
+
+// Clicking must persist the flip.
+const toggleButton = off.buttons.find((b) => b.label === '开启共享')
+if (toggleButton && typeof toggleButton.onClick === 'function') {
+  toggleButton.onClick()
+  await new Promise((r) => setTimeout(r, 30))
+  const put = offState.calls.find((c) => c.init && c.init.method === 'PUT')
+  check('clicking the switch persists enabled=true', put !== undefined && JSON.parse(put.init.body).enabled === true, put ? put.init.body.slice(0, 120) : 'no PUT issued')
+} else {
+  check('clicking the switch persists enabled=true', false, 'no clickable toggle')
+}
 
 const failed = results.filter((r) => !r.ok)
 console.log('\n' + (results.length - failed.length) + '/' + results.length + ' checks passed')

@@ -28,6 +28,7 @@ const React = {
   useState: (init) => [typeof init === 'function' ? init() : init, () => {}],
   useCallback: (fn) => fn,
   useEffect: () => {},
+  useRef: (init) => ({ current: init }),
   Fragment: 'Fragment',
 }
 
