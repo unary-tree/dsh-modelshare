@@ -98,7 +98,7 @@ const walk = (value) => {
   if (typeof value === 'string' || typeof value === 'number') { texts.push(String(value)); return }
   if (Array.isArray(value)) { for (const item of value) walk(item); return }
   if (typeof value !== 'object') return
-  if (value.type === 'input' && value.props?.type === 'checkbox') found.checkboxes++
+  if (value.type === 'input' && value.props?.type === 'checkbox' && value.props?.['data-master'] !== 'true') found.checkboxes++
   if (value.type === 'code') found.codes.push(value.props?.children)
   if (value.type === 'button') found.buttons.push(value.props?.children)
   if (value.props) walk(value.props.children)
@@ -135,7 +135,7 @@ React2.__reset()
 tree2 = Page2({})
 
 const texts2 = []
-const found2 = { checkboxes: 0, buttons: [], codes: [] }
+const found2 = { checkboxes: 0, masters: 0, buttons: [], codes: [] }
 /**
  * Walk a rendered tree the way React does: a function element type is a
  * component, so render it with its props instead of treating it as a leaf.
@@ -146,7 +146,10 @@ const walk2 = (value, depth = 0) => {
   if (Array.isArray(value)) { for (const item of value) walk2(item, depth); return }
   if (typeof value !== 'object') return
   if (typeof value.type === 'function') { walk2(value.type(value.props ?? {}), depth + 1); return }
-  if (value.type === 'input' && value.props?.type === 'checkbox') found2.checkboxes++
+  if (value.type === 'input' && value.props?.type === 'checkbox') {
+    if (value.props?.['data-master'] === 'true') found2.masters++
+    else found2.checkboxes++
+  }
   if (value.type === 'code') found2.codes.push(value.props?.children)
   if (value.type === 'button') found2.buttons.push(value.props?.children ?? value.props?.label ?? JSON.stringify(Object.keys(value.props ?? {})))
   if (value.props) walk2(value.props.children, depth + 1)
@@ -160,6 +163,7 @@ check('loaded page shows a copy button', found2.buttons.some((b) => String(b).in
 check('loaded page shows the Base URL', /Base URL/.test(text2) && found2.codes.some((c) => String(c).includes('127.0.0.1:8787')), JSON.stringify(found2.codes))
 check('loaded page shows the model section', /可用模型/.test(text2))
 check('loaded page renders one checkbox per model', found2.checkboxes === SAMPLE.models.length, found2.checkboxes + ' vs ' + SAMPLE.models.length)
+check('the three selection buttons are gone in favour of one master box', found2.masters === 1 && !found2.buttons.some((b) => ['全选', '全部不选', '不限制'].includes(String(b))), JSON.stringify({ masters: found2.masters, buttons: found2.buttons }))
 check('loaded page lists model ids', /workbuddy\/deepseek-v4\.1-flash/.test(text2) || found2.checkboxes === 2)
 
 // --- sharing switch ---
@@ -302,7 +306,7 @@ const REFRESHED = {
       if (typeof v !== 'object') return
       if (typeof v.type === 'function') { walk(v.type(v.props ?? {}), d + 1); return }
       if (v.type === 'button') buttons.push({ label: v.props?.children, onClick: v.props?.onClick, disabled: v.props?.disabled })
-      if (v.type === 'input' && v.props?.type === 'checkbox') checkboxes.push(v)
+      if (v.type === 'input' && v.props?.type === 'checkbox' && v.props?.['data-master'] !== 'true') checkboxes.push(v)
       if (v.props) walk(v.props.children, d + 1)
     }
     walk(t)
@@ -443,6 +447,7 @@ const REFRESHED = {
   const collectC = (t) => {
     const buttons = []
     const boxes = []
+    const masters = []
     const walk = (v, d = 0) => {
       if (v === null || v === undefined || d > 60) return
       if (Array.isArray(v)) { for (const x of v) walk(x, d); return }
@@ -450,43 +455,39 @@ const REFRESHED = {
       // Icon is a component too; a label-based comparison would be lost here.
       if (typeof v.type === 'function') { walk(v.type(v.props ?? {}), d + 1); return }
       if (v.type === 'button') buttons.push({ label: v.props?.children, onClick: v.props?.onClick })
-      if (v.type === 'input' && v.props?.type === 'checkbox') boxes.push({ checked: v.props?.checked })
+      if (v.type === 'input' && v.props?.type === 'checkbox') {
+        if (v.props?.['data-master'] === 'true') masters.push({ checked: v.props?.checked, onChange: v.props?.onChange })
+        else boxes.push({ checked: v.props?.checked })
+      }
       if (v.props) walk(v.props.children, d + 1)
     }
     walk(t)
-    return { buttons, boxes }
+    return { buttons, boxes, masters }
   }
 
-  // Start from an all-ticked whitelist so clearing is a real change.
-  const seeded = await (async () => {
-    // SAMPLE has sharedModels = ['workbuddy/deepseek-v4.1-flash'] (one of two);
-    // tick both first so every box starts on.
-    const before = collectC(Page({}))
-    const all = before.buttons.find((b) => b.label === '全选')
-    await all.onClick()
-    await new Promise((r) => setTimeout(r, 20))
-    ReactC.__reset()
-    return collectC(Page({}))
-  })()
-  check('全选 ticks every model', seeded.boxes.every((b) => b.checked === true), JSON.stringify(seeded.boxes))
+  // The master box is the single selection control: ticking it means "all",
+  // unticking it means "none". Drive both directions and check the effect.
+  const firstRender = collectC(Page({}))
+  check('the master box exists', firstRender.masters.length === 1, String(firstRender.masters.length))
+  check('the master starts ticked when unrestricted', firstRender.masters[0]?.checked === true, JSON.stringify(firstRender.masters))
 
+  // Untick -> deny all.
+  await firstRender.masters[0].onChange({ target: { checked: false } })
+  await new Promise((r) => setTimeout(r, 30))
   ReactC.__reset()
-  const afterAll = collectC(Page({}))
-  const clear = afterAll.buttons.find((b) => b.label === '全部不选')
-  check('the clear control exists', clear !== undefined, JSON.stringify(afterAll.buttons.map((b) => b.label)))
+  const cleared = collectC(Page({}))
+  check('unticking the master clears every model (regression)', cleared.boxes.every((b) => b.checked === false), JSON.stringify(cleared.boxes))
+  const lastPut = puts.at(-1)
+  check('unticking persists an empty list, not "unrestricted"', lastPut && lastPut.sharedModels.length === 0 && lastPut.unrestricted === false, JSON.stringify(lastPut))
 
-  if (clear) {
-    await clear.onClick()
-    await new Promise((r) => setTimeout(r, 30))
-    ReactC.__reset()
-    const after = collectC(Page({}))
-    check('clearing leaves every box unticked (regression)', after.boxes.every((b) => b.checked === false), JSON.stringify(after.boxes))
-    const last = puts.at(-1)
-    check('clearing persists an empty list, not "unrestricted"', last && last.sharedModels.length === 0 && last.unrestricted === false, JSON.stringify(last))
-  } else {
-    check('clearing leaves every box unticked (regression)', false, 'no clear control')
-    check('clearing persists an empty list, not "unrestricted"', false, 'no clear control')
-  }
+  // Tick again -> all.
+  ReactC.__reset()
+  const afterClear = collectC(Page({}))
+  await afterClear.masters[0].onChange({ target: { checked: true } })
+  await new Promise((r) => setTimeout(r, 30))
+  ReactC.__reset()
+  const reticked = collectC(Page({}))
+  check('ticking the master enables every model', reticked.boxes.every((b) => b.checked === true), JSON.stringify(reticked.boxes))
 }
 
 // --- listen scope option ---
