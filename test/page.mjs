@@ -489,6 +489,77 @@ const REFRESHED = {
   }
 }
 
+// --- listen scope option ---
+{
+  const ReactL = makeReact()
+  const registeredL = []
+  const puts = []
+  const sample = { ...SAMPLE, settings: { ...SAMPLE.settings, listen: 'loopback' }, lanAddress: '192.168.1.10' }
+  const sandbox = {
+    window: { __ModuleLoader__: { load: (h) => registeredL.push(h) } },
+    document: { querySelector: () => null, createElement: () => ({ dataset: {}, textContent: '' }), head: { appendChild: () => {} } },
+    navigator: { clipboard: { writeText: async () => {} } },
+    fetch: async (url, init) => {
+      if (init && init.method === 'PUT') {
+        const body = JSON.parse(init.body)
+        puts.push(body)
+        return { ok: true, json: async () => ({ ok: true, settings: body, baseUrl: 'http://127.0.0.1:8787/v1' }) }
+      }
+      return { ok: true, json: async () => sample }
+    },
+    setTimeout, clearTimeout, console,
+  }
+  sandbox.globalThis = sandbox
+  vm.createContext(sandbox)
+  vm.runInContext(source, sandbox, { filename: 'c.js' })
+  const seedL = { 'react': ReactL, 'react/jsx-runtime': jsxRuntime, '@deepseek-ai/dsh-client-ui-primitives': primitives }
+  const ex = registeredL[0].factory((spec) => {
+    if (Object.prototype.hasOwnProperty.call(seedL, spec)) return seedL[spec]
+    throw new Error('unexpected require ' + spec)
+  })
+  let cap = null
+  ex.apply({ slots: { inject: (k, cb) => cb(), register: (spec, component) => { cap = { spec, component }; return cap } } })
+  const Page = cap.component
+  Page({})
+  await new Promise((r) => setTimeout(r, 30))
+  ReactL.__reset()
+
+  const collectL = (t) => {
+    const radios = []
+    const texts = []
+    const walk = (v, d = 0) => {
+      if (v === null || v === undefined || d > 60) return
+      if (typeof v === 'string' || typeof v === 'number') { texts.push(String(v)); return }
+      if (Array.isArray(v)) { for (const x of v) walk(x, d); return }
+      if (typeof v !== 'object') return
+      if (typeof v.type === 'function') { walk(v.type(v.props ?? {}), d + 1); return }
+      if (v.type === 'input' && v.props?.type === 'radio') radios.push({ checked: v.props?.checked, onChange: v.props?.onChange })
+      if (v.props) walk(v.props.children, d + 1)
+    }
+    walk(t)
+    return { radios, text: texts.join(' ') }
+  }
+
+  const first = collectL(Page({}))
+  check('the page offers both listen scopes', first.radios.length === 2, String(first.radios.length))
+  check('loopback is selected by default', first.radios[0]?.checked === true, JSON.stringify(first.radios.map((r) => r.checked)))
+  check('the LAN address is shown', /192\.168\.1\.10/.test(first.text), JSON.stringify(first.text.slice(0, 120)))
+
+  // Switch to LAN: the choice must be persisted.
+  const lanRadio = first.radios[1]
+  if (lanRadio && typeof lanRadio.onChange === 'function') {
+    await lanRadio.onChange()
+    await new Promise((r) => setTimeout(r, 30))
+    ReactL.__reset()
+    const after = collectL(Page({}))
+    check('choosing LAN persists listen=all', puts.some((b) => b.listen === 'all'), JSON.stringify(puts.map((b) => b.listen)))
+    check('LAN mode warns about exposure', /局域网|任何人/.test(after.text), JSON.stringify(after.text.slice(0, 140)))
+  } else {
+    check('choosing LAN persists listen=all', false, 'no LAN radio')
+    check('LAN mode warns about exposure', false, 'no LAN radio')
+  }
+}
+
 const failed = results.filter((r) => !r.ok)
 console.log('\n' + (results.length - failed.length) + '/' + results.length + ' checks passed')
 process.exit(failed.length === 0 ? 0 : 1)
