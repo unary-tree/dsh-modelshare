@@ -250,6 +250,86 @@ if (toggleButton && typeof toggleButton.onClick === 'function') {
   check('clicking the switch persists enabled=true', false, 'no clickable toggle')
 }
 
+// --- refresh button ---
+// A refresh must re-read the catalog from the harness while leaving the user's
+// checkboxes alone. A catalog that grew by one model proves the refetch landed.
+const REFRESHED = {
+  ...SAMPLE,
+  models: [
+    ...SAMPLE.models,
+    { id: 'trae/deepseek-v4-pro', provider: 'trae', providerName: 'Trae', model: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' },
+  ],
+}
+
+{
+  const ReactR = makeReact()
+  const registeredR = []
+  const callsR = []
+  let served = SAMPLE
+  const sandbox = {
+    window: { __ModuleLoader__: { load: (h) => registeredR.push(h) } },
+    document: { querySelector: () => null, createElement: () => ({ dataset: {}, textContent: '' }), head: { appendChild: () => {} } },
+    navigator: { clipboard: { writeText: async () => {} } },
+    fetch: async (url, init) => {
+      callsR.push({ url, init })
+      return { ok: true, json: async () => served }
+    },
+    setTimeout, clearTimeout, console,
+  }
+  sandbox.globalThis = sandbox
+  vm.createContext(sandbox)
+  vm.runInContext(source, sandbox, { filename: 'c.js' })
+  const seedR = { 'react': ReactR, 'react/jsx-runtime': jsxRuntime, '@deepseek-ai/dsh-client-ui-primitives': primitives }
+  const ex = registeredR[0].factory((spec) => {
+    if (Object.prototype.hasOwnProperty.call(seedR, spec)) return seedR[spec]
+    throw new Error('unexpected require ' + spec)
+  })
+  let cap = null
+  ex.apply({ slots: { inject: (k, cb) => cb(), register: (spec, component) => { cap = { spec, component }; return cap } } })
+  const Page = cap.component
+  Page({})
+  await new Promise((r) => setTimeout(r, 30))
+  ReactR.__reset()
+  let tree = Page({})
+
+  const collect = (t) => {
+    const buttons = []
+    const checkboxes = []
+    const seen = new Set()
+    const walk = (v, d = 0) => {
+      if (v === null || v === undefined || d > 60) return
+      if (Array.isArray(v)) { for (const x of v) walk(x, d); return }
+      if (typeof v !== 'object') return
+      if (typeof v.type === 'function') { walk(v.type(v.props ?? {}), d + 1); return }
+      if (v.type === 'button') buttons.push({ label: v.props?.children, onClick: v.props?.onClick, disabled: v.props?.disabled })
+      if (v.type === 'input' && v.props?.type === 'checkbox') checkboxes.push(v)
+      if (v.props) walk(v.props.children, d + 1)
+    }
+    walk(t)
+    return { buttons, checkboxes }
+  }
+
+  const first = collect(tree)
+  const refresh = first.buttons.find((b) => b.label === '刷新')
+  check('models card offers a refresh button', refresh !== undefined, JSON.stringify(first.buttons.map((b) => b.label)))
+  check('model count starts at the served catalog', first.checkboxes.length === SAMPLE.models.length, String(first.checkboxes.length))
+
+  if (refresh && typeof refresh.onClick === 'function') {
+    const before = callsR.length
+    served = REFRESHED
+    await refresh.onClick()
+    await new Promise((r) => setTimeout(r, 30))
+    ReactR.__reset()
+    tree = Page({})
+    const after = collect(tree)
+    check('refresh re-fetches the catalog', callsR.length > before, callsR.length + ' calls')
+    check('refresh shows the new model', after.checkboxes.length === REFRESHED.models.length, after.checkboxes.length + ' vs ' + REFRESHED.models.length)
+  } else {
+    check('refresh re-fetches the catalog', false, 'no clickable refresh')
+    check('refresh shows the new model', false, 'no clickable refresh')
+  }
+}
+
 const failed = results.filter((r) => !r.ok)
 console.log('\n' + (results.length - failed.length) + '/' + results.length + ' checks passed')
 process.exit(failed.length === 0 ? 0 : 1)
